@@ -1,0 +1,1244 @@
+library(reshape2)
+library(reshape)
+library(tidyverse)
+library(MASS)
+library(mice)
+library(lsmeans)
+
+
+# Function for LOCF
+coalesce <- function(...) {
+  apply(cbind(...), 1, function(x) {
+    x[which(!is.na(x))[1]]
+  })
+}
+
+# Function for subset
+subset_trt_gen <- function(data, value, gen) {
+  data1 <- data %>% filter(Trt == value & sex == gen)
+  return(data1)
+}
+
+# Function for Variance of ratio using Delta Method
+delta_var <- function(baseline, postbaseline, type = 0, base, post, basev,
+                      postv, covar) {
+  if (type == 0) {
+    dvar <- (((var(postbaseline) / (mean(baseline)**2)) +
+      ((var(baseline) * (mean(postbaseline)**2)) / (mean(baseline)**4)) -
+      (2 * mean(postbaseline) * cov(baseline, postbaseline) /
+         (mean(baseline)**3))) *
+      (100**2)) / (ss * 4)
+  } else if
+  (type == 1) {
+    dvar <- (((mean(postv) / (mean(base)**2)) +
+      ((mean(basev) * (mean(post)**2)) / (mean(base)**4)) -
+      (2 * mean(post) * mean(covar) / (mean(base)**3))) *
+      (100**2)) / (ss * 4)
+  }
+  return(dvar)
+}
+
+mu1_1 <- c(0.7223, 0.72454, 0.724, 1.154352)
+mu1_2 <- c(0.7223, 0.72454, 0.724, 0.432882)
+sigma1 <- matrix(c(
+  0.006035, 0.005872, 0.006363, 0.006749,
+  0.005872, 0.005979, 0.00636, 0.006746,
+  0.006363, 0.00636, 0.007052, 0.007406,
+  0.006749, 0.006746, 0.007406, 0.008171
+), ncol = 4, byrow = TRUE)
+
+mu2_1 <- c(0.73455, 0.72935, 0.73068, 1.165504)
+mu2_2 <- c(0.73455, 0.72935, 0.73068, 0.437064)
+sigma2 <- matrix(c(
+  0.009362, 0.009508, 0.009203, 0.009055,
+  0.009508, 0.009971, 0.00949, 0.009376,
+  0.009203, 0.00949, 0.009355, 0.009207,
+  0.009055, 0.009376, 0.009207, 0.009285
+), ncol = 4, byrow = TRUE)
+expected1 <- (
+  (((1.154352 - 0.7223) / 0.7223) + ((0.432882 - 0.7223) / 0.7223)) / 2 -
+    (((1.165504 - 0.73455) / 0.73455) + ((0.437064 - 0.73455) / 0.73455)) / 2
+) * 100
+# function to generate and analyze data
+simulation_anal <- function(ss, sim, rho1 = 0.8) {
+  for (i in 1:N) {
+    set.seed(123789 + i)
+    bvn11 <- data.frame(cbind(mvrnorm(ss,
+      mu = mu1_1,
+      Sigma = sigma1
+    ), sex = 1))
+    colnames(bvn11) <- c("X1", "X4", "X3", "X2", "sex")
+    set.seed(123789 + i)
+    bvn12 <- data.frame(cbind(mvrnorm(ss,
+      mu = mu1_2,
+      Sigma = sigma1
+    ), sex = 0))
+    colnames(bvn12) <- c("X1", "X4", "X3", "X2", "sex")
+    bvn1 <- rbind(
+      bvn11 %>% dplyr::select(X1, X2, sex),
+      bvn12 %>% dplyr::select(X1, X2, sex)
+    )
+    bvn1$pch <- ((bvn1$X2 / bvn1$X1) - 1) * 100
+    median_t <- median(bvn1$pch)
+    bvn1$rand10 <- ifelse(bvn1$pch < median_t, rbinom(ss, 1, 0.8), 1)
+    bvn1$rand15 <- ifelse(bvn1$pch < median_t, rbinom(ss, 1, 0.7), 1)
+    bvn1$rand20 <- ifelse(bvn1$pch < median_t, rbinom(ss, 1, 0.6), 1)
+    bvn1$rand25 <- ifelse(bvn1$pch < median_t, rbinom(ss, 1, 0.5), 1)
+    bvn1$pchmis10 <- ifelse(bvn1$pch < median_t & bvn1$rand10 == 0, NA,
+                            bvn1$pch)
+    bvn1$pchmis15 <- ifelse(bvn1$pch < median_t & bvn1$rand15 == 0, NA,
+                            bvn1$pch)
+    bvn1$pchmis20 <- ifelse(bvn1$pch < median_t & bvn1$rand20 == 0, NA,
+                            bvn1$pch)
+    bvn1$pchmis25 <- ifelse(bvn1$pch < median_t & bvn1$rand25 == 0, NA,
+                            bvn1$pch)
+    bvn1$X2_10 <- ifelse(bvn1$pch < median_t & bvn1$rand10 == 0, NA, bvn1$X2)
+    bvn1$X2_15 <- ifelse(bvn1$pch < median_t & bvn1$rand15 == 0, NA, bvn1$X2)
+    bvn1$X2_20 <- ifelse(bvn1$pch < median_t & bvn1$rand20 == 0, NA, bvn1$X2)
+    bvn1$X2_25 <- ifelse(bvn1$pch < median_t & bvn1$rand25 == 0, NA, bvn1$X2)
+
+    set.seed(123789 + i)
+    bvn21 <- data.frame(cbind(mvrnorm(ss,
+      mu = mu2_1,
+      Sigma = sigma2
+    ), sex = 1))
+    colnames(bvn21) <- c("X1", "X4", "X3", "X2", "sex")
+    set.seed(123789 + i)
+    bvn22 <- data.frame(cbind(mvrnorm(ss,
+      mu = mu2_2,
+      Sigma = sigma2
+    ), sex = 0))
+    colnames(bvn22) <- c("X1", "X4", "X3", "X2", "sex")
+    bvn2 <- rbind(
+      bvn21 %>% dplyr::select(X1, X2, sex),
+      bvn22 %>% dplyr::select(X1, X2, sex)
+    )
+    bvn2$pch <- ((bvn2$X2 / bvn2$X1) - 1) * 100
+    median_c <- median(bvn2$pch)
+    bvn2$rand10 <- ifelse(bvn2$pch < median_c, rbinom(ss, 1, 0.8), 1)
+    bvn2$rand15 <- ifelse(bvn2$pch < median_c, rbinom(ss, 1, 0.7), 1)
+    bvn2$rand20 <- ifelse(bvn2$pch < median_c, rbinom(ss, 1, 0.6), 1)
+    bvn2$rand25 <- ifelse(bvn2$pch < median_c, rbinom(ss, 1, 0.5), 1)
+    bvn2$pchmis10 <- ifelse(bvn2$pch < median_c & bvn2$rand10 == 0, NA,
+                            bvn2$pch)
+    bvn2$pchmis15 <- ifelse(bvn2$pch < median_c & bvn2$rand15 == 0, NA,
+                            bvn2$pch)
+    bvn2$pchmis20 <- ifelse(bvn2$pch < median_c & bvn2$rand20 == 0, NA,
+                            bvn2$pch)
+    bvn2$pchmis25 <- ifelse(bvn2$pch < median_c & bvn2$rand25 == 0, NA,
+                            bvn2$pch)
+    bvn2$X2_10 <- ifelse(bvn2$pch < median_c & bvn2$rand10 == 0, NA, bvn2$X2)
+    bvn2$X2_15 <- ifelse(bvn2$pch < median_c & bvn2$rand15 == 0, NA, bvn2$X2)
+    bvn2$X2_20 <- ifelse(bvn2$pch < median_c & bvn2$rand20 == 0, NA, bvn2$X2)
+    bvn2$X2_25 <- ifelse(bvn2$pch < median_c & bvn2$rand25 == 0, NA, bvn2$X2)
+
+    predata0 <- rbind(cbind(bvn1, Treat = 1), cbind(bvn2, Treat = 0))
+
+    for (j in c(20, 30, 40, 50)) {
+      if (j == 20) {
+        predata <- predata0 %>% dplyr::select(X1, sex, pchmis10, X2_10, Treat)
+        colnames(predata) <- c("baseline", "sex", "response", "postbase", "Trt")
+      }
+      if (j == 30) {
+        predata <- predata0 %>% dplyr::select(X1, sex, pchmis15, X2_15, Treat)
+        colnames(predata) <- c("baseline", "sex", "response", "postbase", "Trt")
+      }
+      if (j == 40) {
+        predata <- predata0 %>% dplyr::select(X1, sex, pchmis20, X2_20, Treat)
+        colnames(predata) <- c("baseline", "sex", "response", "postbase", "Trt")
+      }
+      if (j == 50) {
+        predata <- predata0 %>% dplyr::select(X1, sex, pchmis25, X2_25, Treat)
+        colnames(predata) <- c("baseline", "sex", "response", "postbase", "Trt")
+      }
+
+      # multiple imputation
+      imp <- mice(data = predata, m = 10, method = "pmm", maxit = 50,
+                  print = FALSE)
+      # First, turn the datasets into long format
+      imp_long <- mice::complete(imp, action = "long", include = TRUE)
+      # Convert treatment and sex variable to factor
+      imp_long$Trt <- with(
+        imp_long,
+        as.factor(imp_long$Trt)
+      )
+      imp_long$sex <- with(
+        imp_long,
+        as.factor(imp_long$sex)
+      )
+      # Convert back to mids type - mice can work with this type
+      imp_long_mids <- as.mids(imp_long)
+      # Regression
+      fitimp <- with(
+        imp_long_mids,
+        lsmeans::lsmeans(lm(response ~ Trt + sex), pairwise ~ Trt)$contrasts
+      )
+      delta_estimatet_m <- imp_long %>%
+        filter(.imp > 0 & Trt == 1 & sex == 1) %>%
+        group_by(factor(.imp)) %>%
+        summarize(
+          post_t = mean(postbase),
+          base_t = mean(baseline),
+          var_post_t = var(postbase),
+          var_base_t = var(baseline),
+          cov_t = cov(postbase, baseline)
+        )
+      delta_estimatet_f <- imp_long %>%
+        filter(.imp > 0 & Trt == 1 & sex == 0) %>%
+        group_by(factor(.imp)) %>%
+        summarize(
+          post_t = mean(postbase),
+          base_t = mean(baseline),
+          var_post_t = var(postbase),
+          var_base_t = var(baseline),
+          cov_t = cov(postbase, baseline)
+        )
+      delta_estimatec_m <- imp_long %>%
+        filter(.imp > 0 & Trt == 0 & sex == 1) %>%
+        group_by(factor(.imp)) %>%
+        summarize(
+          post_c = mean(postbase),
+          base_c = mean(baseline),
+          var_post_c = var(postbase),
+          var_base_c = var(baseline),
+          cov_c = cov(postbase, baseline)
+        )
+      delta_estimatec_f <- imp_long %>%
+        filter(.imp > 0 & Trt == 0 & sex == 0) %>%
+        group_by(factor(.imp)) %>%
+        summarize(
+          post_c = mean(postbase),
+          base_c = mean(baseline),
+          var_post_c = var(postbase),
+          var_base_c = var(baseline),
+          cov_c = cov(postbase, baseline)
+        )
+
+      if (i < 2) {
+        if (j == 20) {
+          flagdat1_20 <- cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          )
+          colnames(flagdat1_20) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 30) {
+          flagdat1_30 <- cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          )
+          colnames(flagdat1_30) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 40) {
+          flagdat1_40 <- cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          )
+          colnames(flagdat1_40) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 50) {
+          flagdat1_50 <- cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          )
+          colnames(flagdat1_50) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        }
+      } else {
+        if (j == 20) {
+          flagdat1_20 <- rbind(flagdat1_20, cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          ))
+        } else if (j == 30) {
+          flagdat1_30 <- rbind(flagdat1_30, cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          ))
+        } else if (j == 40) {
+          flagdat1_40 <- rbind(flagdat1_40, cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          ))
+        } else if (j == 50) {
+          flagdat1_50 <- rbind(flagdat1_50, cbind(
+            summary(pool(fitimp))[1, 2], summary(pool(fitimp))[1, 3],
+            (
+              ((mean(delta_estimatet_m$post_t) /
+                mean(delta_estimatet_m$base_t)) +
+                (mean(delta_estimatet_f$post_t) /
+                  mean(delta_estimatet_f$base_t))) / 2 -
+                ((mean(delta_estimatec_m$post_c) /
+                  mean(delta_estimatec_m$base_c)) +
+                  (mean(delta_estimatec_f$post_c) /
+                    mean(delta_estimatec_f$base_c))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                ,
+                , 1, delta_estimatet_m$base_t, delta_estimatet_m$post_t,
+                delta_estimatet_m$var_base_t, delta_estimatet_m$var_post_t,
+                delta_estimatet_m$cov_t
+              ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatet_f$base_t, delta_estimatet_f$post_t,
+                  delta_estimatet_f$var_base_t, delta_estimatet_f$var_post_t,
+                  delta_estimatet_f$cov_t
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_m$base_c, delta_estimatec_m$post_c,
+                  delta_estimatec_m$var_base_c, delta_estimatec_m$var_post_c,
+                  delta_estimatec_m$cov_c
+                ) +
+                delta_var(
+                  ,
+                  , 1, delta_estimatec_f$base_c, delta_estimatec_f$post_c,
+                  delta_estimatec_f$var_base_c, delta_estimatec_f$var_post_c,
+                  delta_estimatec_f$cov_c
+                )
+            )
+          ))
+        }
+      }
+      # completers set
+      predata1 <- predata %>% filter(!is.na(response))
+      fit2 <- aov(response ~ Trt + sex, predata1)
+      lsmean2 <- data.frame(lsmeans::lsmeans(lm(fit2),
+                                             pairwise ~ Trt)$contrasts)
+
+      if (i < 2) {
+        if (j == 20) {
+          flagdat2_20 <- cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          )
+          colnames(flagdat2_20) <- c("Estimate", "Std_Error", "D_estimate",
+                                     "D_Std_Error")
+        } else if (j == 30) {
+          flagdat2_30 <- cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          )
+          colnames(flagdat2_30) <- c("Estimate", "Std_Error", "D_estimate",
+                                     "D_Std_Error")
+        } else if (j == 40) {
+          flagdat2_40 <- cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          )
+          colnames(flagdat2_40) <- c("Estimate", "Std_Error", "D_estimate",
+                                     "D_Std_Error")
+        } else if (j == 50) {
+          flagdat2_50 <- cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          )
+          colnames(flagdat2_50) <- c("Estimate", "Std_Error", "D_estimate",
+                                     "D_Std_Error")
+        }
+      } else {
+        if (j == 20) {
+          flagdat2_20 <- rbind(flagdat2_20, cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          ))
+        } else if (j == 30) {
+          flagdat2_30 <- rbind(flagdat2_30, cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          ))
+        } else if (j == 40) {
+          flagdat2_40 <- rbind(flagdat2_40, cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          ))
+        } else if (j == 50) {
+          flagdat2_50 <- rbind(flagdat2_50, cbind(
+            lsmean2$estimate, lsmean2$SE,
+            (((mean(subset_trt_gen(predata1, 1, 1)$postbase) /
+              mean(subset_trt_gen(predata1, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata1, 1, 0)$postbase) /
+                mean(subset_trt_gen(predata1, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata1, 0, 1)$postbase) /
+                mean(subset_trt_gen(predata1, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata1, 0, 0)$postbase) /
+                  mean(subset_trt_gen(predata1, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata1, 1, 1)$baseline,
+                subset_trt_gen(predata1, 1, 1)$postbase
+              ) +
+                delta_var(
+                  subset_trt_gen(predata1, 1, 0)$baseline,
+                  subset_trt_gen(predata1, 1, 0)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 1)$baseline,
+                  subset_trt_gen(predata1, 0, 1)$postbase
+                ) +
+                delta_var(
+                  subset_trt_gen(predata1, 0, 0)$baseline,
+                  subset_trt_gen(predata1, 0, 0)$postbase
+                )
+            )
+          ))
+        }
+      }
+      # LOCF
+      predata2 <- predata
+      predata2$response1 <- coalesce(predata$response, 0)
+      predata2$postbase1 <- coalesce(predata$postbase, predata$baseline)
+      fit3 <- aov(response1 ~ Trt + sex, predata2)
+      lsmean3 <- data.frame(lsmeans::lsmeans(lm(fit3),
+                                             pairwise ~ Trt)$contrasts)
+
+      if (i < 2) {
+        if (j == 20) {
+          flagdat3_20 <- cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(subset_trt_gen(predata2, 1, 1)$baseline,
+                        subset_trt_gen(predata2, 1, 1)$postbase1) +
+                delta_var(subset_trt_gen(predata2, 1, 0)$baseline,
+                          subset_trt_gen(predata2, 1, 0)$postbase1) +
+                delta_var(subset_trt_gen(predata2, 0, 1)$baseline,
+                          subset_trt_gen(predata2, 0, 1)$postbase1) +
+                delta_var(subset_trt_gen(predata2, 0, 0)$baseline,
+                          subset_trt_gen(predata2, 0, 0)$postbase1)
+            )
+          )
+          colnames(flagdat3_20) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 30) {
+          flagdat3_30 <- cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          )
+          colnames(flagdat3_30) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 40) {
+          flagdat3_40 <- cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          )
+          colnames(flagdat3_40) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        } else if (j == 50) {
+          flagdat3_50 <- cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          )
+          colnames(flagdat3_50) <- c(
+            "Estimate", "Std_Error", "D_estimate",
+            "D_Std_Error"
+          )
+        }
+      } else {
+        if (j == 20) {
+          flagdat3_20 <- rbind(flagdat3_20, cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          ))
+        } else if (j == 30) {
+          flagdat3_30 <- rbind(flagdat3_30, cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          ))
+        } else if (j == 40) {
+          flagdat3_40 <- rbind(flagdat3_40, cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          ))
+        } else if (j == 50) {
+          flagdat3_50 <- rbind(flagdat3_50, cbind(
+            lsmean3$estimate, lsmean3$SE,
+            (((mean(subset_trt_gen(predata2, 1, 1)$postbase1) /
+              mean(subset_trt_gen(predata2, 1, 1)$baseline)) +
+              (mean(subset_trt_gen(predata2, 1, 0)$postbase1) /
+                mean(subset_trt_gen(predata2, 1, 0)$baseline))) / 2 -
+              ((mean(subset_trt_gen(predata2, 0, 1)$postbase1) /
+                mean(subset_trt_gen(predata2, 0, 1)$baseline)) +
+                (mean(subset_trt_gen(predata2, 0, 0)$postbase1) /
+                  mean(subset_trt_gen(predata2, 0, 0)$baseline))) / 2
+            ) * 100,
+            sqrt(
+              delta_var(
+                subset_trt_gen(predata2, 1, 1)$baseline,
+                subset_trt_gen(predata2, 1, 1)$postbase1
+              ) +
+                delta_var(
+                  subset_trt_gen(predata2, 1, 0)$baseline,
+                  subset_trt_gen(predata2, 1, 0)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 1)$baseline,
+                  subset_trt_gen(predata2, 0, 1)$postbase1
+                ) +
+                delta_var(
+                  subset_trt_gen(predata2, 0, 0)$baseline,
+                  subset_trt_gen(predata2, 0, 0)$postbase1
+                )
+            )
+          ))
+        }
+      }
+    }
+    # whole data
+    predata_orig <- predata0 %>% dplyr::select(X1, X2, sex, pch, Treat)
+    colnames(predata_orig) <- c(
+      "baseline", "postbase", "sex",
+      "response", "Trt"
+    )
+    fit1 <- aov(response ~ Trt + sex, predata_orig)
+    lsmean1 <- data.frame(lsmeans::lsmeans(lm(fit1), pairwise ~ Trt)$contrasts)
+
+    if (i < 2) {
+      flagdat <- cbind(
+        lsmean1$estimate, lsmean1$SE,
+        (((mean(subset_trt_gen(predata_orig, 1, 1)$postbase) /
+          mean(subset_trt_gen(predata_orig, 1, 1)$baseline)) +
+          (mean(subset_trt_gen(predata_orig, 1, 0)$postbase) /
+            mean(subset_trt_gen(predata_orig, 1, 0)$baseline))) / 2 -
+          ((mean(subset_trt_gen(predata_orig, 0, 1)$postbase) /
+            mean(subset_trt_gen(predata_orig, 0, 1)$baseline)) +
+            (mean(subset_trt_gen(predata_orig, 0, 0)$postbase) /
+              mean(subset_trt_gen(predata_orig, 0, 0)$baseline))) / 2
+        ) * 100,
+        sqrt(
+          delta_var(
+            subset_trt_gen(predata_orig, 1, 1)$baseline,
+            subset_trt_gen(predata_orig, 1, 1)$postbase
+          ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 1, 0)$baseline,
+              subset_trt_gen(predata_orig, 1, 0)$postbase
+            ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 0, 1)$baseline,
+              subset_trt_gen(predata_orig, 0, 1)$postbase
+            ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 0, 0)$baseline,
+              subset_trt_gen(predata_orig, 0, 0)$postbase
+            )
+        )
+      )
+      colnames(flagdat) <- c(
+        "Estimate", "Std_Error", "D_estimate",
+        "D_Std_Error"
+      )
+    } else {
+      flagdat <- rbind(flagdat, cbind(
+        lsmean1$estimate, lsmean1$SE,
+        (((mean(subset_trt_gen(predata_orig, 1, 1)$postbase) /
+          mean(subset_trt_gen(predata_orig, 1, 1)$baseline)) +
+          (mean(subset_trt_gen(predata_orig, 1, 0)$postbase) /
+            mean(subset_trt_gen(predata_orig, 1, 0)$baseline))) / 2 -
+          ((mean(subset_trt_gen(predata_orig, 0, 1)$postbase) /
+            mean(subset_trt_gen(predata_orig, 0, 1)$baseline)) +
+            (mean(subset_trt_gen(predata_orig, 0, 0)$postbase) /
+              mean(subset_trt_gen(predata_orig, 0, 0)$baseline))) / 2
+        ) * 100,
+        sqrt(
+          delta_var(
+            subset_trt_gen(predata_orig, 1, 1)$baseline,
+            subset_trt_gen(predata_orig, 1, 1)$postbase
+          ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 1, 0)$baseline,
+              subset_trt_gen(predata_orig, 1, 0)$postbase
+            ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 0, 1)$baseline,
+              subset_trt_gen(predata_orig, 0, 1)$postbase
+            ) +
+            delta_var(
+              subset_trt_gen(predata_orig, 0, 0)$baseline,
+              subset_trt_gen(predata_orig, 0, 0)$postbase
+            )
+        )
+      ))
+    }
+  }
+  # record data in a single list for output
+  return(list( # Actual complete data estimates
+    Orig_lsmean = mean(data.frame(flagdat)$Estimate),
+    Orig_stderr = sqrt(mean(data.frame(flagdat)$Std_Error**2)),
+    Orig_dmean = mean(data.frame(flagdat)$D_estimate),
+    Orig_dstderr = sqrt(mean(data.frame(flagdat)$D_Std_Error**2)),
+    # Completers set estimates ignoring the missing
+    COMP10_lsmean = mean(data.frame(flagdat2_20)$Estimate),
+    COMP10_stderr = sqrt(mean(data.frame(flagdat2_20)$Std_Error**2)),
+    COMP10_dmean = mean(data.frame(flagdat2_20)$D_estimate),
+    COMP10_dstderr = sqrt(mean(data.frame(flagdat2_20)$D_Std_Error**2)),
+    COMP15_lsmean = mean(data.frame(flagdat2_30)$Estimate),
+    COMP15_stderr = sqrt(mean(data.frame(flagdat2_30)$Std_Error**2)),
+    COMP15_dmean = mean(data.frame(flagdat2_30)$D_estimate),
+    COMP15_dstderr = sqrt(mean(data.frame(flagdat2_30)$D_Std_Error**2)),
+    COMP20_lsmean = mean(data.frame(flagdat2_40)$Estimate),
+    COMP20_stderr = sqrt(mean(data.frame(flagdat2_40)$Std_Error**2)),
+    COMP20_dmean = mean(data.frame(flagdat2_40)$D_estimate),
+    COMP20_dstderr = sqrt(mean(data.frame(flagdat2_40)$D_Std_Error**2)),
+    COMP25_lsmean = mean(data.frame(flagdat2_50)$Estimate),
+    COMP25_stderr = sqrt(mean(data.frame(flagdat2_50)$Std_Error**2)),
+    COMP25_dmean = mean(data.frame(flagdat2_50)$D_estimate),
+    COMP25_dstderr = sqrt(mean(data.frame(flagdat2_50)$D_Std_Error**2)),
+    # Estimates imputing the missing with LOCF method
+    LOCF10_lsmean = mean(data.frame(flagdat3_20)$Estimate),
+    LOCF10_stderr = sqrt(mean(data.frame(flagdat3_20)$Std_Error**2)),
+    LOCF10_dmean = mean(data.frame(flagdat3_20)$D_estimate),
+    LOCF10_dstderr = sqrt(mean(data.frame(flagdat3_20)$D_Std_Error**2)),
+    LOCF15_lsmean = mean(data.frame(flagdat3_30)$Estimate),
+    LOCF15_stderr = sqrt(mean(data.frame(flagdat3_30)$Std_Error**2)),
+    LOCF15_dmean = mean(data.frame(flagdat3_30)$D_estimate),
+    LOCF15_dstderr = sqrt(mean(data.frame(flagdat3_30)$D_Std_Error**2)),
+    LOCF20_lsmean = mean(data.frame(flagdat3_40)$Estimate),
+    LOCF20_stderr = sqrt(mean(data.frame(flagdat3_40)$Std_Error**2)),
+    LOCF20_dmean = mean(data.frame(flagdat3_40)$D_estimate),
+    LOCF20_dstderr = sqrt(mean(data.frame(flagdat3_40)$D_Std_Error**2)),
+    LOCF25_lsmean = mean(data.frame(flagdat3_50)$Estimate),
+    LOCF25_stderr = sqrt(mean(data.frame(flagdat3_50)$Std_Error**2)),
+    LOCF25_dmean = mean(data.frame(flagdat3_50)$D_estimate),
+    LOCF25_dstderr = sqrt(mean(data.frame(flagdat3_50)$D_Std_Error**2)),
+    # Estimates imputing the missing with MI method
+    MI10_lsmean = mean(data.frame(flagdat1_20)$Estimate),
+    MI10_stderr = sqrt(mean(data.frame(flagdat1_20)$Std_Error**2)),
+    MI10_dmean = mean(data.frame(flagdat1_20)$D_estimate),
+    MI10_dstderr = sqrt(mean(data.frame(flagdat1_20)$D_Std_Error**2)),
+    MI15_lsmean = mean(data.frame(flagdat1_30)$Estimate),
+    MI15_stderr = sqrt(mean(data.frame(flagdat1_30)$Std_Error**2)),
+    MI15_dmean = mean(data.frame(flagdat1_30)$D_estimate),
+    MI15_dstderr = sqrt(mean(data.frame(flagdat1_30)$D_Std_Error**2)),
+    MI20_lsmean = mean(data.frame(flagdat1_40)$Estimate),
+    MI20_stderr = sqrt(mean(data.frame(flagdat1_40)$Std_Error**2)),
+    MI20_dmean = mean(data.frame(flagdat1_40)$D_estimate),
+    MI20_dstderr = sqrt(mean(data.frame(flagdat1_40)$D_Std_Error**2)),
+    MI25_lsmean = mean(data.frame(flagdat1_50)$Estimate),
+    MI25_stderr = sqrt(mean(data.frame(flagdat1_50)$Std_Error**2)),
+    MI25_dmean = mean(data.frame(flagdat1_50)$D_estimate),
+    MI25_dstderr = sqrt(mean(data.frame(flagdat1_50)$D_Std_Error**2))
+  ))
+}
+out_matrix <- data.frame(simulation_anal(ss = 200, sim = 1000))
+output <- data.frame(t(out_matrix))
+
+output2 <- data.frame(cbind(output, rownames(output)))
+colnames(output2) <- c("value", "stat")
+row.names(output2) <- NULL
+
+output3 <- data.frame(do.call("rbind", strsplit(as.character(output2$stat), "_",
+  fixed = TRUE
+)))
+output4 <- cbind(output3, x3 = output2$value)
+cast_data <- cast(output4, X1 ~ X2)
+cast_data$lsmean <- -1 * cast_data$lsmean
+cast_data

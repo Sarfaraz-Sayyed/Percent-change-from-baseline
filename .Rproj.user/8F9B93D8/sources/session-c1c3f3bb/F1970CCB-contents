@@ -1,0 +1,46 @@
+data <- airquality
+summary(data)
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(data,2,pMiss)
+apply(data,1,pMiss)
+
+
+
+
+
+tempData <- mice(data,m=5,maxit=50,meth='pmm',seed=500)
+summary(tempData)
+modelFit1 <- with(tempData,lm(Temp~ Ozone+Solar.R+Wind))
+summary(pool(modelFit1))
+
+modelFit1 <- with(X2,glm(pchmis10~ Treat))
+summary(pool(modelFit1))
+pool(with(X2, lm(pchmis10~ Treat)))$pooled$estimate
+
+
+X2 %>% filter(Treat==2) %>%
+  group_by(.imp) %>% 
+  summarize(mean = mean(pchmis10))
+
+
+# First, turn the datasets into long format
+anesimp_long <- mice::complete(xy6, action="long", include = TRUE)
+
+# Convert two variables into numeric
+anesimp_long$Treat <- with(anesimp_long, 
+                                     as.factor(anesimp_long$Treat))
+# anesimp_long$pid_x <- with(anesimp_long, 
+#                            as.integer(anesimp_long$pid_x))
+
+# Take log of M&A variable 
+# anesimp_long$LogMANO<-log(anesimp_long$MANo+1.01)
+
+# Convert back to mids type - mice can work with this type
+anesimp_long_mids<-as.mids(anesimp_long)
+# Regression 
+
+
+fitimp <- with(anesimp_long_mids,
+               lm(pchmis10~ Treat))
+
+summary(pool(fitimp))

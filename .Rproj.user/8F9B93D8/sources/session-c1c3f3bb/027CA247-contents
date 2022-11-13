@@ -1,0 +1,193 @@
+install.packages(c("compositions","pwr","MASS", repos='http://cran.india.r-project.org'))
+library(compositions)
+library(pwr)
+library(MASS)
+library(xlsx)
+
+# delta = meandiff/stddev
+delta=(-0.28113 - (-0.80464))/sqrt((15.19594 + 9.270252)/2) 
+delta
+
+#sample size calculation
+pwr.t.test(d=delta, sig.level=.05, power = .85, type = 'two.sample')
+sample=pwr.t.test(d=delta, sig.level=.05, power = .85, type = 'two.sample')
+
+
+
+# Atributes for Baseline, Year1, Year2, Year3
+mu1 <- c(0.7135,0.71215,0.72524,0.72275)
+sigma1 <- matrix(c(0.006035,0.005872,0.006363,0.006749,0.005872,0.005979,0.00636,0.006746,0.006363,0.00636,0.007052,0.007406,0.006749,0.006746,0.007406,0.008171),ncol=4,byrow=TRUE)
+mu2 <- c(0.72387,0.7215,0.72691,0.73004)
+sigma2 <- matrix(c(0.009362,0.009508,0.009203,0.009055,0.009508,0.009971,0.00949,0.009376,0.009203,0.00949,0.009355,0.009207,0.009055,0.009376,0.009207,0.009285),ncol=4,byrow=TRUE)
+
+# completers set, there is no change in the sigma matrix in both the sets.
+mu1c <- c(0.7223,0.72454,0.724,0.72147)
+mu2c <- c(0.73455,0.72935,0.73068,0.72844)
+
+
+#-------------------------------------------------------------------------------------------------------------------------------
+# Atributes for Baseline, Change at Year1, Change at Year2, Change at Year3
+mu3 <- c(0.7135,-0.00126,0.00113,0.00004)
+sigma3 <- matrix(c(0.006035,-0.00016,0.000328,0.000713,-0.00016,0.000271,0.00016,0.000161,0.000328,0.00016,0.000361,0.00033,0.000713,0.000161,0.00033, 0.000709), ncol=4,byrow=TRUE)
+mu4 <- c(0.72387,-0.00506,-0.00568,-0.00673)
+sigma4 <- matrix(c(0.009362,0.000145,-0.00016,-0.00031,0.000145,0.000318,0.000142,0.000176,-0.00016,0.000142,0.000312,0.000311,-0.00031,0.000176,0.000311, 0.000538
+),ncol=4,byrow=TRUE)
+
+# completers set, there is no change in the sigma matrix in both the sets.
+mu3c <- c(0.7223,0.00225,0.0017,-0.00082)
+mu4c <- c(0.73455,-0.00521,-0.00388,-0.00612)
+
+
+
+#-----------------------------------------------------------------------------------------------------------------------------
+
+# Atributes for Baseline, Percent Change at Year1, Percent Change at Year2, Percent Change at Year3
+mu5 <- c(0.7135,-0.17695,0.10046,-0.13696)
+sigma5 <- matrix(c(0.006035,-0.02599,0.05781,0.122753,-0.02599,5.33631,2.86731,2.687386,0.05781,2.86731,7.480053,7.35009,0.122753,2.687386,7.35009,15.19594
+),ncol=4,byrow=TRUE)
+mu6 <- c(0.72387,-0.74457,-0.79355,-0.89662)
+sigma6 <- matrix(c(0.009362,0.029203,-0.01315,-0.02115,0.029203,6.739561,2.825658,3.580712,-0.01315,2.825658,5.779866,5.581304,-0.02115,3.580712,5.581304, 9.270252
+),ncol=4,byrow=TRUE)
+
+# completers set, there is no change in the sigma matrix in both the sets.
+mu5c <- c(0.7223,0.34628,0.15639,-0.28113)
+mu6c <- c(0.73455,-0.74782,-0.50997,-0.80464)
+
+#--------------------------------------------------------------------------------------------------------------------------------------
+
+simmns1<-function(m1,m2,sigma,sigma1,n1,n2,N,intype,lnorm)
+  # intype refers to the input variables, inputs expected are as follows
+  # 1 - percent change
+  # 2 - change from baseline
+  # 3 - absolute values
+{
+  flag=0;
+  flag1=0;
+  misprct1=n1*0.72; #making 28% missing
+  misprct2=n2*0.72; #making 28% missing
+  set.seed(135739)
+  for (i in  1:N)
+  {
+    
+    if (intype == 3)
+    {
+      x1=mvrnorm(n1, m1, sigma, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+      y1=mvrnorm(n2, m2, sigma1, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+      ttest=t.test((x1[,4]-x1[,1])*100/(x1[,1]),(y1[,4]-y1[,1])*100/(y1[,1]));
+      if (ttest$p.value<0.05) {flag=flag+1}
+      
+      ttest1=t.test((x1[1:misprct1,4]-x1[1:misprct1,1])*100/(x1[1:misprct1,1]),(y1[1:misprct2,4]-y1[1:misprct2,1])*100/(y1[1:misprct2,1]));
+      
+      if (ttest1$p.value<0.05) {flag1=flag1+1}
+      temp=matrix(c(mean((x1[,4]-x1[,1])*100/(x1[,1])),sd((x1[,4]-x1[,1])*100/(x1[,1])),mean((y1[,4]-y1[,1])*100/(y1[,1])),sd((y1[,4]-y1[,1])				*100/(y1[,1])),ttest$p.value, ttest$estimate, ttest$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output=temp}
+      else {output=rbind(output,temp)}
+      
+      temp1=matrix(c(mean((x1[1:misprct1,4]-x1[1:misprct1,1])*100/(x1[1:misprct1,1])),sd((x1[1:misprct1,4]-x1[1:misprct1,1])*100/(x1		[1:misprct1,1])),mean((y1[1:misprct1,4]-y1[1:misprct1,1])*100/(y1[1:misprct1,1])),sd((y1[1:misprct1,4]-y1[1:misprct1,1])*100/(y1		[1:misprct1,1])),ttest1$p.value,ttest1$estimate, ttest1$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output1=temp1}
+      else {output1=rbind(output1,temp1)}
+    }
+    
+    if (intype == 2)
+    {
+      if (lnorm == 0)
+      {
+        x1=mvrnorm(n1, m1, sigma, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+        y1=mvrnorm(n2, m2, sigma1, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+      }
+      if (lnorm == 1)
+      {
+        x1=rlnorm.rplus(n1, m1, sigma);
+        y1=rlnorm.rplus(n2, m2, sigma1);
+      }	
+      ttest=t.test(exp(x1[,4])*100/exp(x1[,1]),exp(y1[,4])*100/exp(y1[,1]));
+      if (ttest$p.value<0.05) {flag=flag+1}
+      
+      ttest1=t.test(exp(x1[1:misprct1,4])*100/exp(x1[1:misprct1,1]),exp(y1[1:misprct2,4])*100/exp(y1[1:misprct2,1]));
+      
+      if (ttest1$p.value<0.05) {flag1=flag1+1}
+      temp=matrix(c(mean(exp(x1[,4])*100/exp(x1[,1])),sd(exp(x1[,4])*100/exp(x1[,1])),mean(exp(y1[,4])*100/exp(y1[,1])),sd(exp(y1[,4])*100/exp(y1[,1])),ttest$p.value, ttest$estimate,ttest$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output=temp}
+      else {output=rbind(output,temp)}
+      
+      temp1=matrix(c(mean(exp(x1[1:misprct1,4])*100/exp(x1[1:misprct1,1])),sd(exp(x1[1:misprct1,4])*100/exp(x1[1:misprct1,1])),mean(exp(y1[1:misprct1,4])*100/exp(y1[1:misprct1,1])),sd(exp(y1[1:misprct1,4])*100/exp(y1[1:misprct1,1])),ttest1$p.value,ttest1$estimate, ttest1$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output1=temp1}
+      else {output1=rbind(output1,temp1)}
+    }
+    if (intype == 1)
+    {
+      if (lnorm == 0)
+      {
+        x1=mvrnorm(n1, m1, sigma, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+        y1=mvrnorm(n2, m2, sigma1, tol = 1e-6, empirical = FALSE, EISPACK = FALSE);
+      }
+      if (lnorm == 1)
+      {
+        x1=rlnorm.rplus(n1, m1, sigma);
+        y1=rlnorm.rplus(n2, m2, sigma1);
+      }
+      ttest=t.test(x1[,4],y1[,4]);
+      if (ttest$p.value<0.05) {flag=flag+1}
+      
+      ttest1=t.test(x1[1:misprct1,4],y1[1:misprct2,4]);
+      
+      if (ttest1$p.value<0.05) {flag1=flag1+1}
+      temp=matrix(c(mean(x1[,4]),sd(x1[,4]),mean(y1[,4]),sd(y1[,4]),ttest$p.value, ttest$estimate,ttest$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output=temp}
+      else {output=rbind(output,temp)}
+      
+      temp1=matrix(c(mean(x1[1:misprct1,4]),sd(x1[1:misprct1,4]),mean(y1[1:misprct1,4]),sd(y1[1:misprct1,4]),ttest1$p.value,ttest1$estimate, 		ttest1$conf.int),ncol=9, byrow=TRUE);
+      if (i < 2) {output1=temp1}
+      else {output1=rbind(output1,temp1)}
+    }
+  }
+  
+  out=cbind(output, output1);
+  return(list(out,flag,flag1))
+  
+  
+}
+
+#simulating the percent change variable and carrying out the ttest using attributes from the raw data using all the available information
+out.matrix=simmns1(mu5,mu6,sigma5,sigma6,round(sample$n, digit=0),round(sample$n, digit=0),10000,1,0)
+write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/rdpchgsim.xlsx") 
+
+#simulating the change from baseline variable and carrying out the ttest using attributes from the raw data using all the available information
+#out.matrix=simmns1(mu3,mu4,sigma3,sigma4,round(sample$n, digit=0),round(sample$n, digit=0),10000,2,0)
+#write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/rdchgsim.xlsx") 
+
+#simulating the absolute values and carrying out the ttest using attributes from the raw data using all the available information
+out.matrix=simmns1(mu1,mu2,sigma1,sigma2,round(sample$n, digit=0),round(sample$n, digit=0),10000,3,0)
+write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/rdabssim.xlsx") 
+
+
+
+#simulating the percent change variable and carrying out the ttest using attributes from the completers set
+out.matrix=simmns1(mu5c,mu6c,sigma5,sigma6,round(sample$n, digit=0),round(sample$n, digit=0),10000,1,0)
+write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/cdpchgsim.xlsx") 
+
+#simulating the change from baseline variable and carrying out the ttest using attributes from the completers set
+#out.matrix=simmns1(mu3c,mu4c,sigma3,sigma4,round(sample$n, digit=0),round(sample$n, digit=0),10000,2,0)
+#write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/cdchgsim.xlsx") 
+
+#simulating the absolute values and carrying out the ttest using attributes from the completers set
+out.matrix=simmns1(mu1c,mu2c,sigma1,sigma2,round(sample$n, digit=0),round(sample$n, digit=0),10000,3,0)
+write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/cdabssim.xlsx") 
+
+
+#simulating the absolute values from log normal distribution and carrying out the ttest using attributes from the completers set
+#out.matrix=simmns1(mu1c,mu2c,sigma1,sigma2,round(sample$n, digit=0),round(sample$n, digit=0),10000,3,1)
+#write.xlsx(out.matrix, "C:/Users/SAYYESA2/Desktop/Research work/cdabssimln.xlsx") 
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,17 @@
+
+# Function for subset
+subset_Trt <- function(data, value) {
+  data1 <- data %>% filter(Trt==value)
+  return(data1)
+}
+
+
+
+((mean(subset_Trt(predata0,1)$postbase)/mean(subset_Trt(predata0,1)$baseline)) - 
+  
+  (mean(subset_Trt(predata0,0)$postbase)/mean(subset_Trt(predata0,0)$baseline)))*100
+
+
+subset_Trt(predata0,1)
+
+summary(pool(fitimp1))

@@ -1,0 +1,169 @@
+simmn<-function(m1,m2,sigma,sigma1,n1,n2,N,miss_pcnt,imput_n)
+{
+  flag=0;
+  flag1=0;
+  #set.seed(135739)
+  for (i in  1:N)
+  {
+    x0=cbind(mvrnorm(n1, m1, sigma, tol = 1e-6, empirical = FALSE, EISPACK = FALSE),rep(2 ,   n1),runif(n1,0,1));
+    y0=cbind(mvrnorm(n2, m2, sigma1, tol = 1e-6, empirical = FALSE, EISPACK = FALSE),rep(1 ,   n2),runif(n2,0,1));
+    xy0=rbind(x0,y0);
+    
+    xy1=cbind(xy0[,1],(xy0[,2] - xy0[,1])*100/xy0[,1],(xy0[,3] - xy0[,1])*100/xy0[,1], (xy0  [,4] - xy0[,1])*100/xy0[,1], xy0[,5], xy0[,6]);
+    
+    xy2=cbind(xy1,(year1[,"intercept1"]+(year1[,"baseline1"]*xy1[,1])+(year1[,"chg1_1"]*xy1  [,2]))
+              ,(year2[,"intercept2"]+(year2[,"baseline2"]*xy1[,1])+(year2[,"chg1_2"]*xy1  [,2])+(year2[,"chg2_2"]*xy1[,3]))
+              ,(year3[,"intercept3"]+(year3[,"baseline3"]*xy1[,1])+(year3[,"chg1_3"]*xy1  [,2])+(year3[,"chg2_3"]*xy1[,3])+(year3[,"chg3_3"]*xy1[,4]))
+    );
+    xy3=cbind(xy2,exp(xy2[,5])/(1 + exp(xy2[,5])),exp(xy2[,6])/(1 + exp(xy2[,6])),exp(xy2  [,7])/(1 + exp(xy2[,7])));
+    
+    xy311 <- sapply(xy3[,10],function(x) rbinom(100,1,x));
+    xy312 <- sapply(xy3[,11],function(x) rbinom(100,1,x));
+    xy313 <- sapply(xy3[,12],function(x) rbinom(100,1,x));
+    xy321 <- round(colMeans(xy311, na.rm = FALSE, dims = 1), digit=0);
+    xy322 <- round(colMeans(xy312, na.rm = FALSE, dims = 1), digit=0);
+    xy323 <- round(colMeans(xy313, na.rm = FALSE, dims = 1), digit=0);
+    
+    xy4 <- cbind(xy3,xy321,xy322,xy323);
+    colnames(xy4) <- c("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12",   "v13", "v14", "v15");
+    
+    sum.vec1<-summary(x0);
+    sum.vec2<-summary(y0);
+    
+    xy5 = data.frame(xy4);
+    # 15/200 = 0.075 to get 15% missing out of 200
+    
+    xy5$v16 <- ifelse (xy5$v5 > 1 & xy5$v2 < sum.vec1[3,2] & xy5$v13 > 0|xy5$v5 < 2 & xy5$v2 <  sum.vec2[3,2] & xy5$v13 > 0 ,"NA", xy5$v2);
+    xy5$v17 <- ifelse (xy5$v5 > 1 & xy5$v3 < sum.vec1[3,3] & xy5$v14 > 0|xy5$v5 < 2 & xy5$v3 <  sum.vec2[3,3] & xy5$v14 > 0 ,"NA", xy5$v3);
+    xy5$v18 <- ifelse (xy5$v5 > 1 & xy5$v4 < sum.vec1[3,4] & xy5$v15 > 0|xy5$v5 < 2 & xy5$v4 <  sum.vec2[3,4] & xy5$v15 > 0 ,"NA", xy5$v4);
+    
+    for (j in  c(20,30,40,50))
+    {
+      xy5$v19 <- ifelse (xy5$v5 == 2 & xy5$v4 < sum.vec1[3,4] & xy5$v6 < j*2/round(n2/2)| xy5$v5 == 1 & xy5$v4 < sum.vec2[3,4] & xy5$v6 < j*2/round(n1/2),NA, xy5$v4);
+      
+      
+      #xy6 <- mice(data = xy5, m = imput_n, method = "pmm", maxit = 50, seed = 500);
+      xy6 <- mice(data = xy5, m = imput_n, method = "pmm", maxit = 50);
+      xy7 <- imputationList(lapply(1:imput_n, complete, x=xy6))
+      #summary(xy7)
+      
+      #multiple imputation
+      fit<- with(xy7,lm(v19~v5))
+      #fit<- with(xy7,t.test(v18~v19))
+      pool <- pool(as.mira(fit))
+      #nam <- paste("flagdat1", j, sep = "_")
+      
+      if (i < 2) {
+        if (j == 20) {flagdat1_20=summary(pool)}
+        else if (j == 30) {flagdat1_30=summary(pool)}
+        else if (j == 40) {flagdat1_40=summary(pool)}
+        else if (j == 50) {flagdat1_50=summary(pool)}
+      }
+      else {
+        if (j == 20) {flagdat1_20=rbind(flagdat1_20,summary(pool))}
+        else if (j == 30) {flagdat1_30=rbind(flagdat1_30,summary(pool))}
+        else if (j == 40) {flagdat1_40=rbind(flagdat1_40,summary(pool))}
+        else if (j == 50) {flagdat1_50=rbind(flagdat1_50,summary(pool))}
+      }
+      
+      #completers set
+      xy51 <- xy5[!(xy5$v19 == "NA"),]
+      fit2 <- aov(v19~v5, xy51)
+      #fit2<- with(xy51,lm(v19~v5))
+      #pool2 <- pool(as.mira(fit2))
+      #if (i < 2) {flagdat2=summary(fit2)}
+      #else {flagdat2=rbind(flagdat2,summary(fit2))}
+      if (i < 2) {
+        if (j == 20) {flagdat2_20=coef(summary.lm(fit2))}
+        else if (j == 30) {flagdat2_30=coef(summary.lm(fit2))}
+        else if (j == 40) {flagdat2_40=coef(summary.lm(fit2))}
+        else if (j == 50) {flagdat2_50=coef(summary.lm(fit2))}
+      }
+      else {
+        if (j == 20) {flagdat2_20=rbind(flagdat2_20,coef(summary.lm(fit2)))}
+        else if (j == 30) {flagdat2_30=rbind(flagdat2_30,coef(summary.lm(fit2)))}
+        else if (j == 40) {flagdat2_40=rbind(flagdat2_40,coef(summary.lm(fit2)))}
+        else if (j == 50) {flagdat2_50=rbind(flagdat2_50,coef(summary.lm(fit2)))}
+      }
+      
+      #LOCF
+      xy5$v20 <- coalesce(xy5$v19, xy5$v3)
+      fit3 <- aov(v20~v5, xy5)
+      #fit3<- with(xy5,lm(v20~v5))
+      #pool3 <- pool(as.mira(fit3))
+      #if (i < 2) {flagdat3=summary(fit3)}
+      #else {flagdat3=rbind(flagdat3,summary(fit3))}
+      if (i < 2) {
+        if (j == 20) {flagdat3_20=coef(summary.lm(fit3))}
+        else if (j == 30) {flagdat3_30=coef(summary.lm(fit3))}
+        else if (j == 40) {flagdat3_40=coef(summary.lm(fit3))}
+        else if (j == 50) {flagdat3_50=coef(summary.lm(fit3))}
+      }
+      else {
+        if (j == 20) {flagdat3_20=rbind(flagdat3_20,coef(summary.lm(fit3)))}
+        else if (j == 30) {flagdat3_30=rbind(flagdat3_30,coef(summary.lm(fit3)))}
+        else if (j == 40) {flagdat3_40=rbind(flagdat3_40,coef(summary.lm(fit3)))}
+        else if (j == 50) {flagdat3_50=rbind(flagdat3_50,coef(summary.lm(fit3)))}
+      }
+    }
+    
+    #whole data
+    fit1 <- aov(v4~v5, xy5)
+    #fit1<- with(xy5,lm(v4~v5))
+    #pool1 <- pool(as.mira(fit1))
+    if (i < 2) {flagdat=coef(summary.lm(fit1))}
+    else {flagdat=rbind(flagdat,coef(summary.lm(fit1)))}
+    #if (i < 2) {flagdat=summary(fit1)}
+    #else {flagdat=rbind(flagdat,summary(fit1))}
+    
+    
+    #ttest=t.test((x0[,4]-x0[,1])*100/(x0[,1]),(y0[,4]-y0[,1])*100/(y0[,1]));
+    #if (ttest$p.value<0.05) {flag=flag+1}
+    #fit<- with(xy7,lm(v4~v5))
+    
+    #ttest1=t.test(as.numeric(x5$v18),as.numeric(y5$v18));	
+    #if (ttest1$p.value<0.05) {flag1=flag1+1}
+    
+    #ttest1 =t.test(as.numeric(completeData$v18.j),as.numeric(completeData1$v18.j));
+    #if (ttest1$p.value<0.05) {flag1=flag1+1}
+    
+    
+    #if (i < 2) {flagdat1=matrix(c(flag1),ncol=1,byrow=TRUE)}
+    #else {flagdat1=matrix(c(flagdat1,flag1),ncol=1,byrow=TRUE)}
+    
+    #if (i < 2) {output=matrix(c(ttest$p.value, ttest$estimate, ttest$conf.int),ncol=5,   byrow=TRUE)}
+    #else {output=matrix(c(output,ttest$p.value, ttest$estimate, ttest   $conf.int),ncol=5,byrow=TRUE)}
+    
+    #if (i < 2) {output1=matrix(c(ttest1$p.value, ttest1$estimate, ttest1$conf.int),ncol=5,   byrow=TRUE)}
+    #else {output1=matrix(c(output1,ttest1$p.value, ttest1$estimate,   ttest1$conf.int),ncol=5,byrow=TRUE)}
+    
+    #out=cbind(output, flagdat, output1, flagdat1);
+    #missx.vec <- apply(x5, 2, function(x) length(which(!is.na(x))));
+    #missy.vec <- apply(y5, 2, function(x) length(which(!is.na(x))));
+  }
+  write.xlsx(flagdat,  file.path(path , "orig.csv")) 
+  write.xlsx(flagdat1_20,  file.path(path , "mi_10.xlsx"))
+  write.xlsx(flagdat1_30,  file.path(path , "mi_15.xlsx"))
+  write.xlsx(flagdat1_40,  file.path(path , "mi_20.xlsx"))
+  write.xlsx(flagdat1_50,  file.path(path , "mi_25.xlsx"))
+  
+  write.xlsx(flagdat2_20,  file.path(path , "com_10.xlsx"))
+  write.xlsx(flagdat2_30,  file.path(path , "com_15.xlsx"))
+  write.xlsx(flagdat2_40,  file.path(path , "com_20.xlsx"))
+  write.xlsx(flagdat2_50,  file.path(path , "com_25.xlsx"))
+  
+  write.xlsx(flagdat3_20,  file.path(path , "locf_10.xlsx"))
+  write.xlsx(flagdat3_30,  file.path(path , "locf_15.xlsx"))
+  write.xlsx(flagdat3_40,  file.path(path , "locf_20.xlsx"))
+  write.xlsx(flagdat3_50,  file.path(path , "locf_25.xlsx"))
+  
+  #return(list(mean(output[,2]),mean(output[,3]), flag, flag1, mean(output1[,3]), mean  (output1[,3])))
+  #return(list(out))
+  #return(list(xy5))
+  #return(list(mean(output[,2]),mean(output[,3]), flag, flag1, mean(output1[,3]), mean  (output1[,3]),missx.vec[18],missy.vec[18] ))
+  return(list(flagdat))
+  
+}
+
+
+out.matrix <- simmn(mu7,mu8,sigma7,sigma8,791,791,1,20,10)
