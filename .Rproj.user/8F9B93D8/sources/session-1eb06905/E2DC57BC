@@ -1,0 +1,26 @@
+{
+    "id": "E2DC57BC",
+    "path": "/cloud/project/Percent-change-from-baseline/Estimate_SE_with_covariates.R",
+    "project_path": "Percent-change-from-baseline/Estimate_SE_with_covariates.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1668391743722.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "140,17",
+        "scrollLine": "126"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1668394277,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1668394277380,
+    "read_only": false,
+    "read_only_alternatives": []
+}
